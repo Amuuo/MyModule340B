@@ -298,7 +298,7 @@ function Invoke-ExtractTranscript {
 
         $transcriptVttPath = Join-Path -Path $transcriptFolder -ChildPath "transcript.vtt"
 
-        if (-Not (Test-Path -Path $transcriptTxtPath) -and -Not (Test-Path -Path $transcriptVttPath)) {
+        if (-Not (Test-Path -Path $transcriptVttPath)) {
             Write-Error "Failed to create transcript files."
             return
         }
@@ -325,12 +325,11 @@ function Start-RecordingAndExtractTranscript {
         [string]$ffmpegPath = "ffmpeg",
         [string]$whisperPath = "whisper",
         [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
-        [string]$transcriptFolder = "",
-        [string]$language = "en",  # Added language parameter with default value 'en'
-        [string]$recordDirectory = "$home\Videos\StandUp"
+        [string]$transcriptFolder = "$home\Videos\StandUp",
+        [string]$language = "en" # Added language parameter with default value 'en'
     )    
 
-    Set-OBSRecordDirectory -RecordDirectory $recordDirectory
+    Set-OBSRecordDirectory -RecordDirectory $transcriptFolder
     # Start recording in OBS
     Write-Host "Starting OBS recording..."
     Start-OBSRecord
