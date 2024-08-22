@@ -3,7 +3,7 @@ function Invoke-TrimClipboard {
 }
 
 function Open-MyModule {
-    code 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\MyModule\MyModule.psm1'
+    cursor 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\MyModule\MyModule.psm1'
 }
 
 function Start-PorticoUI { 
@@ -62,16 +62,38 @@ function Convert-ToBase64AndCopy {
     }
 }
 
+function Invoke-AzureDevOpsApi {
+    param (
+        [string]$ApiUri,
+        [string]$base64AuthInfo
+    )
+    
+    $Headers = @{
+        Authorization = "Basic $base64AuthInfo"
+        Accept        = "application/json" 
+    }
+
+    try {
+        Write-Verbose "Requesting URL: $ApiUri"
+        $Response = Invoke-RestMethod -Uri $ApiUri -Headers $Headers -Method Get
+    }
+    catch {
+        Write-Host "Error: $($_.Exception.Message)"
+        return $null
+    }                    
+
+    return $Response
+}
+
 function Get-DevOpsPullRequestStats {
     [CmdletBinding()]
     param (        
         [string]$Organization = "340BTechnology",                
-        [string]$Project = "340Basics",                
-        #[string]$RepositoryId = "e3d9b748-855e-4867-8085-b065f9fea549",                
+        [string]$Project = "340Basics",                                
         [string]$RepositoryId = "340Basics",
         [string]$AccessToken = "zbh4kq5uu3xrgemscxnxrmyn76l2h43z6vyzyjitrqtp327jmcfa",        
         [datetime]$StartDate = (Get-Date).AddDays(-30), # Default to 30 days ago    
-        [datetime]$EndDate = (Get-Date)                  # Default to today's date  # Format: YYYY-MM-DD
+        [datetime]$EndDate = (Get-Date)                 # Default to today's date  # Format: YYYY-MM-DD
     )
 
     # Encode the PAT for authorization header
@@ -80,27 +102,7 @@ function Get-DevOpsPullRequestStats {
     $commitFetchProgressId = 2
     $commitProcessProgressId = 3
     # Helper function to call Azure DevOps REST API
-    function Invoke-AzureDevOpsApi {
-        param (
-            [string]$ApiUri
-        )
-        
-        $Headers = @{
-            Authorization = "Basic $base64AuthInfo"
-            Accept        = "application/json" 
-        }
-
-        try {
-            Write-Verbose "Requesting URL: $ApiUri"
-            $Response = Invoke-RestMethod -Uri $ApiUri -Headers $Headers -Method Get
-        }
-        catch {
-            Write-Host "Error: $($_.Exception.Message)"
-            return $null
-        }                    
-
-        return $Response
-    }
+    
 
     $UriBase = "https://dev.azure.com/$Organization/$Project/_apis/git/repositories/$RepositoryId/pullrequests?searchCriteria.status=all&searchCriteria.maxTime=$($EndDate.ToString("yyyy-MM-dd"))&searchCriteria.minTime=$($StartDate.ToString("yyyy-MM-dd"))&searchCriteria.queryTimeRangeType=closed&api-version=7.1-preview.1"
     $Skip = 0
@@ -110,7 +112,7 @@ function Get-DevOpsPullRequestStats {
     do {
         $CurrentUri = "$UriBase&`$skip=$Skip&`$top=$Top"
         
-        $Response = Invoke-AzureDevOpsApi -ApiUri $CurrentUri
+        $Response = Invoke-AzureDevOpsApi -ApiUri $CurrentUri -base64AuthInfo $base64AuthInfo
         if ($Response) {
             $AllPullRequests += $Response.value
         }
@@ -134,27 +136,11 @@ function Get-DevOpsPullRequestStats {
         }
 
         $CommitsUri = "$($PR.url)/commits?api-version=7.1-preview.1"
-        $CommitSkip = 0
-        $CommitTop = 5
         $Commits = @()
-
 
         $CommitsUri = "$($PR.url)/commits?api-version=7.1-preview.1"
         $CommitResponse = Invoke-AzureDevOpsApi -ApiUri $CommitsUri
         $Commits = $CommitResponse.value
-        # do {
-        #     $CommitsUri = "$($PR.url)/commits?api-version=7.1-preview.1&`$skip=$CommitSkip&`$top=$CommitTop"
-        #     $CommitResponse = Invoke-AzureDevOpsApi -ApiUri $CommitsUri
-            
-        #     if ($CommitResponse -and $CommitResponse.value) {
-        #         $Commits += $CommitResponse.value
-        #     }
-            
-        #     $CommitSkip += $CommitTop
-
-        #     Write-Progress -Id $commitFetchProgressId -ParentId $mainProgressId -Activity "Fetching Commits for PR: $($PR.pullRequestId)" -Status "Processed $Commits Commits" -PercentComplete ($CommitSkip / ($CommitResponse.count + $CommitSkip) * 100)
-    
-        # } while ($CommitResponse -and $CommitResponse.count -eq 5)
 
         # Initialize PR stats
         if (-not $UserStats.ContainsKey($User)) {
@@ -210,14 +196,172 @@ function Get-DevOpsPullRequestStats {
     }
 }
 
-Export-ModuleMember -Function Get-DevOpsPullRequestStats
+function New-GifFromVideo {
+    param(
+        [string]$VideoPath,
+        [string]$GifPath,
+        [int]$StartTime = 0, # Start time in seconds
+        [int]$Duration = 5, # Duration of the gif in seconds
+        [int]$Width = 480, # Width of the gif
+        [int]$Fps = 10 # Frames per second for higher quality
+    )
 
+    if (-Not (Test-Path $VideoPath)) {
+        Write-Error "Video file not found: $VideoPath"
+        return
+    }
 
+    $palette = "$([System.IO.Path]::GetTempPath())palette.png"
+    $filters = "fps=$Fps,scale=${Width}:-1:flags=lanczos"
+
+    # Generate palette for high quality
+    $ffmpegPaletteCmd = "ffmpeg -y -ss $StartTime -t $Duration -i `"$VideoPath`" -vf `"$filters,palettegen`" -y `"$palette`""
+    $ffmpegGifCmd = "ffmpeg -y -ss $StartTime -t $Duration -i `"$VideoPath`" -i `"$palette`" -lavfi `"$filters [x]; [x][1:v] paletteuse`" -y `"$GifPath`""
+
+    try {
+        Invoke-Expression $ffmpegPaletteCmd
+        Invoke-Expression $ffmpegGifCmd
+        Write-Output "High-quality GIF created at: $GifPath"
+    }
+    catch {
+        Write-Error "Failed to create high-quality GIF: $_"
+    }
+    finally {
+        # Cleanup palette image
+        Remove-Item $palette -ErrorAction Ignore
+    }
+}
+
+function Invoke-ExtractTranscript {
+    param (
+        [Parameter(Mandatory = $true)][string]$videoPath,
+        [Parameter(Mandatory = $false)][string]$ffmpegPath = "ffmpeg",
+        [Parameter(Mandatory = $false)][string]$whisperPath = "whisper",
+        [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
+        [string]$transcriptFolder = "",
+        [string]$language = "en"  # Added language parameter with default value 'en'
+    )
+
+    # Check if the video file exists
+    if (-Not (Test-Path -Path $videoPath)) {
+        Write-Error "The specified video file does not exist: $videoPath"
+        return
+    }
+
+    # Create a folder with the name of the video (without extension) if not manually provided
+    $videoName = [System.IO.Path]::GetFileNameWithoutExtension($videoPath)
+    
+    if (-not $transcriptFolder) {
+        $transcriptFolder = Join-Path -Path (Get-Location) -ChildPath "${videoName}"
+    }
+
+    if (-Not (Test-Path -Path $transcriptFolder -PathType Container)) {
+        try {
+            New-Item -ItemType Directory -Path $transcriptFolder -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-Error "Failed to create transcript directory: $_"
+            return
+        }
+    }
+
+    # Move the video file to the transcript folder
+    $newVideoPath = Join-Path -Path $transcriptFolder -ChildPath (Get-Item $videoPath).Name
+    try {
+        Move-Item -Path $videoPath -Destination $newVideoPath -Force
+    }
+    catch {
+        Write-Error "Failed to move the video file to the transcript directory: $_"
+        return
+    }
+
+    # Define the output audio file path
+    $audioPath = [System.IO.Path]::ChangeExtension($newVideoPath, ".mp3")
+
+    try {
+        # Extract audio from the video file using FFmpeg
+        $ffmpegCommand = "-i `"$newVideoPath`" -q:a 0 -map a `"$audioPath`""
+        Write-Output "Extracting audio from video..."
+        Start-Process -FilePath $ffmpegPath -ArgumentList $ffmpegCommand -Wait -NoNewWindow -ErrorAction Stop
+
+        # Check if the audio file was created
+        if (-Not (Test-Path -Path $audioPath)) {
+            Write-Error "Failed to extract audio."
+            return
+        }
+
+        # Run Whisper on the extracted audio file and save output to transcript files
+        $whisperCommand = "`"$audioPath`" --model $model --output_dir `"$transcriptFolder`" --language $language --device cuda --output_format vtt"
+        Write-Output "Running Whisper on the extracted audio using model '$model' and language '$language'..."
+        Start-Process -FilePath $whisperPath -ArgumentList $whisperCommand -Wait -NoNewWindow -ErrorAction Stop
+
+        # Check if the transcript files were created
+        $transcriptTxtPath = Join-Path -Path $transcriptFolder -ChildPath "transcript.txt"
+        $transcriptVttPath = Join-Path -Path $transcriptFolder -ChildPath "transcript.vtt"
+
+        if (-Not (Test-Path -Path $transcriptTxtPath) -and -Not (Test-Path -Path $transcriptVttPath)) {
+            Write-Error "Failed to create transcript files."
+            return
+        }
+
+        # Optionally remove the audio file
+        Remove-Item -Path $audioPath -Force
+
+        Write-Output "Transcript files saved to: $transcriptFolder"
+
+        return [pscustomobject]@{
+            TranscriptFolder  = $transcriptFolder
+            TranscriptTxtPath = $transcriptTxtPath
+            TranscriptVttPath = $transcriptVttPath
+            AudioPath         = $audioPath
+            VideoPath         = $newVideoPath
+        }
+    }
+    catch {
+        Write-Error $_.Exception.ToString()
+    }
+}
+
+function Start-RecordingAndExtractTranscript {
+    param (
+        [Parameter(Mandatory = $true)][string]$ffmpegPath = "ffmpeg",
+        [Parameter(Mandatory = $true)][string]$whisperPath = "whisper",
+        [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
+        [string]$transcriptFolder = "",
+        [string]$language = "en"  # Added language parameter with default value 'en'
+    )
+
+    # Start recording in OBS
+    Write-Host "Starting OBS recording..."
+    Start-OBSRecord
+
+    # Wait for user input to stop recording
+    Write-Host "Press Enter to stop recording..."
+    Read-Host
+
+    # Stop recording and get the output details
+    Write-Host "Stopping OBS recording..."
+    $recordingDetails = Stop-OBSRecord
+
+    # Extract the FullName property for the recorded video file
+    $videoPath = $recordingDetails.FullName
+
+    if (-not $videoPath) {
+        Write-Error "No recording found."
+        return
+    }
+
+    # Invoke the transcript extraction method
+    Invoke-ExtractTranscript -videoPath $videoPath -ffmpegPath $ffmpegPath -whisperPath $whisperPath -model $model -transcriptFolder $transcriptFolder -language $language
+}
 
 
 
 Set-Alias -Name 'trimclip' `
     -Value 'Invoke-TrimClipboard'
+
+Set-Alias -Name 'standup' `
+    -Value 'Start-RecordingAndExtractTranscript'
 
 Export-ModuleMember -Function "Invoke-TrimClipboard", 
 "Open-MyModule", 
@@ -226,5 +370,9 @@ Export-ModuleMember -Function "Invoke-TrimClipboard",
 'Set-LocalConfig', 
 'Restart-Synergy',
 'Convert-ToBase64AndCopy',
-"Get-DevOpsPullRequestStats"`
+'New-GifFromVideo',
+'Get-DevOpsPullRequestStats',
+'Extract-AudioAndRunWhisper',
+'Invoke-ExtractTranscript',
+'Start-RecordingAndExtractTranscript'`
     -Alias 'trimclip'
