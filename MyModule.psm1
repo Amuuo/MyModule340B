@@ -7,12 +7,12 @@ function Open-MyModule {
 }
 
 function Start-PorticoUI { 
-    Set-Location 'C:\Projects\340Basics\src\Apexio.UI'
+    Set-Location 'C:\Projects\tmp2\340Basics\src\Apexio.UI'
     npm start
 }
 
 function Start-CentralApi {
-    Set-Location 'C:\Projects\340Basics\src\CentralAPI'
+    Set-Location 'C:\Projects\tmp2\340Basics\src\CentralAPI'
     dotnet run
 }
 
@@ -234,9 +234,9 @@ function New-GifFromVideo {
 
 function Invoke-ExtractTranscript {
     param (
-        [Parameter(Mandatory = $true)][string]$videoPath,
-        [Parameter(Mandatory = $false)][string]$ffmpegPath = "ffmpeg",
-        [Parameter(Mandatory = $false)][string]$whisperPath = "whisper",
+        [string]$videoPath,
+        [string]$ffmpegPath = "ffmpeg",
+        [string]$whisperPath = "whisper",
         [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
         [string]$transcriptFolder = "",
         [string]$language = "en"  # Added language parameter with default value 'en'
@@ -295,8 +295,7 @@ function Invoke-ExtractTranscript {
         Write-Output "Running Whisper on the extracted audio using model '$model' and language '$language'..."
         Start-Process -FilePath $whisperPath -ArgumentList $whisperCommand -Wait -NoNewWindow -ErrorAction Stop
 
-        # Check if the transcript files were created
-        $transcriptTxtPath = Join-Path -Path $transcriptFolder -ChildPath "transcript.txt"
+
         $transcriptVttPath = Join-Path -Path $transcriptFolder -ChildPath "transcript.vtt"
 
         if (-Not (Test-Path -Path $transcriptTxtPath) -and -Not (Test-Path -Path $transcriptVttPath)) {
@@ -311,7 +310,6 @@ function Invoke-ExtractTranscript {
 
         return [pscustomobject]@{
             TranscriptFolder  = $transcriptFolder
-            TranscriptTxtPath = $transcriptTxtPath
             TranscriptVttPath = $transcriptVttPath
             AudioPath         = $audioPath
             VideoPath         = $newVideoPath
@@ -324,13 +322,15 @@ function Invoke-ExtractTranscript {
 
 function Start-RecordingAndExtractTranscript {
     param (
-        [Parameter(Mandatory = $true)][string]$ffmpegPath = "ffmpeg",
-        [Parameter(Mandatory = $true)][string]$whisperPath = "whisper",
+        [string]$ffmpegPath = "ffmpeg",
+        [string]$whisperPath = "whisper",
         [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
         [string]$transcriptFolder = "",
-        [string]$language = "en"  # Added language parameter with default value 'en'
-    )
+        [string]$language = "en",  # Added language parameter with default value 'en'
+        [string]$recordDirectory = "$home\Videos\StandUp"
+    )    
 
+    Set-OBSRecordDirectory -RecordDirectory $recordDirectory
     # Start recording in OBS
     Write-Host "Starting OBS recording..."
     Start-OBSRecord
@@ -351,8 +351,24 @@ function Start-RecordingAndExtractTranscript {
         return
     }
 
+    while ($true) {
+        try {
+            $stream = [System.IO.File]::Open($videoPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+            $stream.Close()
+            break
+        } catch {
+            Write-Host "Waiting for the video file to be ready..."
+            Start-Sleep -Seconds 1
+        }
+    }
+
     # Invoke the transcript extraction method
-    Invoke-ExtractTranscript -videoPath $videoPath -ffmpegPath $ffmpegPath -whisperPath $whisperPath -model $model -transcriptFolder $transcriptFolder -language $language
+    Invoke-ExtractTranscript -videoPath $videoPath `
+                             -ffmpegPath $ffmpegPath `
+                             -whisperPath $whisperPath `
+                             -model $model `
+                             -transcriptFolder $transcriptFolder `
+                             -language $language
 }
 
 
@@ -375,4 +391,4 @@ Export-ModuleMember -Function "Invoke-TrimClipboard",
 'Extract-AudioAndRunWhisper',
 'Invoke-ExtractTranscript',
 'Start-RecordingAndExtractTranscript'`
-    -Alias 'trimclip'
+    -Alias 'trimclip', 'standup'
