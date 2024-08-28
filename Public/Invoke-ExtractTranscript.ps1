@@ -1,87 +1,125 @@
 function Invoke-ExtractTranscript {
-   param (
-       [string]$videoPath,
-       [string]$ffmpegPath = "ffmpeg",
-       [string]$whisperPath = "whisper",
-       [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
-       [string]$transcriptFolder = "",
-       [string]$language = "en"  # Added language parameter with default value 'en'
-   )
+    param (
+        [Parameter(Mandatory = $true)][string]$videoPath,
+        [Parameter(Mandatory = $false)][string]$ffmpegPath = "ffmpeg",        
+        [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
+        [string]$transcriptFolder = "",
+        [string]$language = "en"
+    )
 
-   # Check if the video file exists
-   if (-Not (Test-Path -Path $videoPath)) {
-       Write-Error "The specified video file does not exist: $videoPath"
-       return
-   }
+    # Assign parameters to script-level variables
+    $script:videoPath = $videoPath
+    $script:ffmpegPath = $ffmpegPath    
+    $script:model = $model
+    $script:transcriptFolder = $transcriptFolder
+    $script:language = $language
 
-   # Create a folder with the name of the video (without extension) if not manually provided
-   $videoName = [System.IO.Path]::GetFileNameWithoutExtension($videoPath)
+    # Check if the video file exists
+    if (-Not (Test-Path -Path $script:videoPath)) {
+        Write-Error "The specified video file does not exist: $script:videoPath"
+        return
+    }
+
+    # Create transcript folder if not provided
+    $script:transcriptFolder = Create-TranscriptFolder
+
+    # Move the video file to the transcript folder
+    $script:newVideoPath = Move-VideoFile
+
+    # Define the output audio file path
+    $script:audioPath = [System.IO.Path]::ChangeExtension($script:newVideoPath, ".mp3")
+
+    try {
+        # Extract audio from the video file using FFmpeg
+        Extract-Audio
+
+        # Run Whisper on the extracted audio file and save output to transcript files
+        $transcriptPaths = Run-Whisper
+
+        # Optionally remove the audio file
+        if (Test-Path -Path $script:audioPath) {
+            Remove-Item -Path $script:audioPath -Force
+        }
+
+        if (Test-Path -Path $script:newVideoPath) {
+            Remove-Item -Path $script:newVideoPath -Force
+        }
+
+        Write-Output "Transcript files saved to: $script:transcriptFolder"
+
+        return $transcriptPaths
+    }
+    catch {
+        Write-Error $_.Exception.ToString()
+    }
+}
+
+function Create-TranscriptFolder {
+    $videoName = [System.IO.Path]::GetFileNameWithoutExtension($script:videoPath)
    
-   if (-not $transcriptFolder) {
-       $transcriptFolder = Join-Path -Path (Get-Location) -ChildPath "${videoName}"
-   }
+    if (-not $script:transcriptFolder) {
+        $script:transcriptFolder = Join-Path -Path (Get-Location) -ChildPath "${videoName}"
+    }
 
-   if (-Not (Test-Path -Path $transcriptFolder -PathType Container)) {
-       try {
-           New-Item -ItemType Directory -Path $transcriptFolder -ErrorAction Stop | Out-Null
-       }
-       catch {
-           Write-Error "Failed to create transcript directory: $_"
-           return
-       }
-   }
+    if (-Not (Test-Path -Path $script:transcriptFolder -PathType Container)) {
+        try {
+            New-Item -ItemType Directory -Path $script:transcriptFolder -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-Error "Failed to create transcript directory: $_"
+            return
+        }
+    }
 
-   # Move the video file to the transcript folder
-   $newVideoPath = Join-Path -Path $transcriptFolder -ChildPath (Get-Item $videoPath).Name
-   try {
-       Move-Item -Path $videoPath -Destination $newVideoPath -Force
-   }
-   catch {
-       Write-Error "Failed to move the video file to the transcript directory: $_"
-       return
-   }
+    return $script:transcriptFolder
+}
 
-   # Define the output audio file path
-   $audioPath = [System.IO.Path]::ChangeExtension($newVideoPath, ".mp3")
+function Move-VideoFile {
+    $newVideoPath = Join-Path -Path $script:transcriptFolder -ChildPath (Get-Item $script:videoPath).Name
+    try {
+        Move-Item -Path $script:videoPath -Destination $newVideoPath -Force
+    }
+    catch {
+        Write-Error "Failed to move the video file to the transcript directory: $_"
+        return
+    }
 
-   try {
-       # Extract audio from the video file using FFmpeg
-       $ffmpegCommand = "-i `"$newVideoPath`" -q:a 0 -map a `"$audioPath`""
-       Write-Output "Extracting audio from video..."
-       Start-Process -FilePath $ffmpegPath -ArgumentList $ffmpegCommand -Wait -NoNewWindow -ErrorAction Stop
+    return $newVideoPath
+}
 
-       # Check if the audio file was created
-       if (-Not (Test-Path -Path $audioPath)) {
-           Write-Error "Failed to extract audio."
-           return
-       }
+function Extract-Audio {
+    $ffmpegCommand = "-i `"$script:newVideoPath`" -q:a 0 -map a `"$script:audioPath`""
+    Write-Output "Extracting audio from video..."
+    Start-Process `
+        -FilePath $script:ffmpegPath `
+        -ArgumentList $ffmpegCommand `
+        -Wait `
+        -NoNewWindow -ErrorAction Stop
 
-       # Run Whisper on the extracted audio file and save output to transcript files
-       $whisperCommand = "`"$audioPath`" --model $model --output_dir `"$transcriptFolder`" --language $language --device cuda --output_format vtt"
-       Write-Output "Running Whisper on the extracted audio using model '$model' and language '$language'..."
-       Start-Process -FilePath $whisperPath -ArgumentList $whisperCommand -Wait -NoNewWindow -ErrorAction Stop
+    # Check if the audio file was created
+    if (-Not (Test-Path -Path $script:audioPath)) {
+        Write-Error "Failed to extract audio."
+        return
+    }
+}
 
+function Run-Whisper {
+    $whisperCommand = @(
+       "`"$script:audioPath`"",
+       "--model", $script:model,
+       "--output_dir", "`"$script:transcriptFolder`"",
+       "--language", $script:language,
+       "--device", "cuda",
+       "--output_format", "vtt"
+   ) -join " "  # Join the array into a single string
 
-       $transcriptVttPath = Join-Path -Path $transcriptFolder -ChildPath "transcript.vtt"
+    Write-Output "Running Whisper on the extracted audio using model '$script:model' and language '$script:language'..."
+    Start-Process `
+        -FilePath "whisper" `
+        -ArgumentList $whisperCommand `
+        -Wait `
+        -NoNewWindow `
+        -ErrorAction Stop
 
-       if (-Not (Test-Path -Path $transcriptVttPath)) {
-           Write-Error "Failed to create transcript files."
-           return
-       }
-
-       # Optionally remove the audio file
-       Remove-Item -Path $audioPath -Force
-
-       Write-Output "Transcript files saved to: $transcriptFolder"
-
-       return [pscustomobject]@{
-           TranscriptFolder  = $transcriptFolder
-           TranscriptVttPath = $transcriptVttPath
-           AudioPath         = $audioPath
-           VideoPath         = $newVideoPath
-       }
-   }
-   catch {
-       Write-Error $_.Exception.ToString()
-   }
+    Invoke-Item -Path $script:transcriptFolder    
 }
