@@ -1,76 +1,45 @@
 function Start-RecordingAndExtractTranscript {
     param (
         [string]$ffmpegPath = "ffmpeg",
-        [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
+        [ValidateSet("tiny", "small", "medium", "large", "base")]
+        [string]$model = "base",
         [string]$transcriptFolder = "$home\Videos\Meetings",
         [string]$language = "en",
-        [string]$recordingName = $(Get-Date -Format "yyyyMMdd_HHmmss")
+        [string]$recordingName = "$standup_$((Get-Date).ToString('_MM_dd_yy'))"
     )
 
-    Write-Host "Opening OBS..."
+    $script:transcriptFolder = $transcriptFolder
+        
     Start-OBS
-
-    Start-Sleep -Seconds 1
-
-    Write-Host "Connecting to OBS..."
-    Connect-OBS -WebSocketToken "EhKUqZKlWsu8EykD" | Out-Null
-
-    Start-Sleep -Seconds 1
-
-    New-Item -ItemType Directory -Name $recordingName -Path $transcriptFolder -Force | Out-Null
-
-    Set-OBSRecordDirectory -RecordDirectory "$transcriptFolder\$recordingName"
-
-    Start-Sleep -Seconds 1
-
-    Write-Host "Starting OBS recording..."
-    Start-OBSRecord
-
-    # Wait for user input to stop recording
-    Write-Host "Press Enter to stop recording..."
-    Read-Host
+        
+    Read-Host -Prompt "Press Enter to stop recording..."
 
     Write-Host "Stopping OBS recording..."
-    $recordingDetails = Stop-OBSRecord
+    $recordingDetails = Stop-OBSRecord        
 
-    # Extract the FullName property for the recorded video file
-    $videoPath = $recordingDetails.FullName
-
-    if (-not $videoPath) {
+    if (-not $recordingDetails.FullName) {
         Write-Error "No recording found."
         return
     }
 
     Start-Sleep -Seconds 5
+    
+    $newVideoPath = Join-Path -Path "$transcriptFolder" -ChildPath "$recordingName.mkv"
+    Rename-Item -Path $recordingDetails.FullName -NewName $newVideoPath
 
-
-    # Generate a new file name based on the provided recordingName
-    $newVideoPath = Join-Path -Path "$transcriptFolder\$recordingName" -ChildPath "$recordingName.mkv"
-    Rename-Item -Path $videoPath -NewName $newVideoPath
-
-   while ($true) {
-        try {
-            $stream = [System.IO.File]::Open($newVideoPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
-            $stream.Close()
-            break
-       }
-       catch {
-            Write-Host "Waiting for the video file to be ready..."
-           Start-Sleep -Seconds 1
-        }
-    }
-
-   # Invoke the transcript extraction method
+    Wait-ForFile -FilePath $newVideoPath
+    
     Invoke-ExtractTranscript -videoPath $newVideoPath `
         -ffmpegPath $ffmpegPath `
         -model $model `
-        -transcriptFolder "$transcriptFolder\$recordingName" `
+        -transcriptFolder "$transcriptFolder" `
         -language $language
 
     Clear-Host
 }
 
 function Start-OBS {
+    Write-Host "Opening OBS..."
     $obsPath = "C:\Program Files\obs-studio\bin\64bit"
 
     $obsProcess = Get-Process -Name "obs64" -ErrorAction SilentlyContinue
@@ -82,9 +51,38 @@ function Start-OBS {
         while (-not (Get-Process -Name "obs64" -ErrorAction SilentlyContinue)) {
             Start-Sleep -Seconds 1
         }
+        Start-Sleep -Seconds 2
         Write-Output "OBS has started."
-    } else {
+    }
+    else {
         Write-Output "OBS is already running."
+    }
+
+    
+    Write-Host "Connecting to OBS..."
+    Connect-OBS -WebSocketToken "EhKUqZKlWsu8EykD" | Out-Null
+
+    Start-Sleep -Seconds 1    
+
+    Set-OBSRecordDirectory -RecordDirectory "$script:transcriptFolder"
+
+    Start-Sleep -Seconds 1
+
+    Write-Host "Starting OBS recording..."
+    Start-OBSRecord
+}
+
+function Wait-ForFile {
+    param ([string]$FilePath)
+    while ($true) {
+        try {
+            $stream = [System.IO.File]::Open($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+            $stream.Close()
+            break
+        }
+        catch {
+            Start-Sleep -Seconds 1
+        }
     }
 }
 
