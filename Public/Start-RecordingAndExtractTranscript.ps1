@@ -1,15 +1,16 @@
 function Start-RecordingAndExtractTranscript {
     param (
-        [string]$ffmpegPath = "ffmpeg",
         [ValidateSet("tiny", "small", "medium", "large", "base")]
         [string]$model = "base",
         [string]$transcriptFolder = "$home\Videos\Meetings",
         [string]$language = "en",
-        [string]$recordingName = "$standup_$((Get-Date).ToString('_MM_dd_yy'))"
+        [string]$recordingName = "standup_$((Get-Date).ToString('_MM_dd_yy'))"
     )
 
     $script:transcriptFolder = $transcriptFolder
-        
+    $script:recordingName = $recordingName
+    
+
     Start-OBS
         
     Read-Host -Prompt "Press Enter to stop recording..."
@@ -30,7 +31,6 @@ function Start-RecordingAndExtractTranscript {
     Wait-ForFile -FilePath $newVideoPath
     
     Invoke-ExtractTranscript -videoPath $newVideoPath `
-        -ffmpegPath $ffmpegPath `
         -model $model `
         -transcriptFolder "$transcriptFolder" `
         -language $language
@@ -62,9 +62,20 @@ function Start-OBS {
     Write-Host "Connecting to OBS..."
     Connect-OBS -WebSocketToken "EhKUqZKlWsu8EykD" | Out-Null
 
-    Start-Sleep -Seconds 1    
+    Start-Sleep -Seconds 1
 
-    Set-OBSRecordDirectory -RecordDirectory "$script:transcriptFolder"
+    $settings = @{
+        RecPath   = $script:transcriptFolder
+        RecFileNameFormatting = "$script:recordingName"
+        RecFormat = "mkv"
+        VBitrate  = 2500
+    }
+    
+    Write-Host "Setting OBS recording settings..."
+    $settings | Format-Table
+    Set-OBSOutputSettings -OutputName "simple_file_output" -OutputSettings $settings
+
+    #Set-OBSRecordDirectory -RecordDirectory "$script:transcriptFolder"
 
     Start-Sleep -Seconds 1
 
@@ -73,10 +84,18 @@ function Start-OBS {
 }
 
 function Wait-ForFile {
-    param ([string]$FilePath)
+    param (
+        [string]$FilePath
+    )
+    
     while ($true) {
         try {
-            $stream = [System.IO.File]::Open($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+            $stream = [System.IO.File]::Open(
+                $FilePath, 
+                [System.IO.FileMode]::Open, 
+                [System.IO.FileAccess]::Read, 
+                [System.IO.FileShare]::None
+            )
             $stream.Close()
             break
         }

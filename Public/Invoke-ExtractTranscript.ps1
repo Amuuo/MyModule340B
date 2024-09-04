@@ -1,7 +1,6 @@
 function Invoke-ExtractTranscript {
     param (
-        [Parameter(Mandatory = $true)][string]$videoPath,
-        [Parameter(Mandatory = $false)][string]$ffmpegPath = "ffmpeg",        
+        [Parameter(Mandatory = $true)][string]$videoPath,        
         [ValidateSet("tiny", "small", "medium", "large", "base")][string]$model = "base",
         [string]$transcriptFolder = "",
         [string]$language = "en"
@@ -91,7 +90,7 @@ function Extract-Audio {
     $ffmpegCommand = "-i `"$script:newVideoPath`" -q:a 0 -map a `"$script:audioPath`""
     Write-Output "Extracting audio from video..."
     Start-Process `
-        -FilePath $script:ffmpegPath `
+        -FilePath "ffmpeg" `
         -ArgumentList $ffmpegCommand `
         -Wait `
         -NoNewWindow -ErrorAction Stop
